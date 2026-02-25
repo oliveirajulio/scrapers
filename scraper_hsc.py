@@ -29,7 +29,7 @@ ALERTA_DESCONTO_MINIMO = 10
 ALERTA_AUMENTO_MINIMO  = 15
 ALERTA_ESTOQUE_BAIXO   = 5
 
-CSV_PATH      = os.path.join(DATA_DIR, "produtos_hsc.csv")
+CSV_PATH      = os.path.join(DATA_DIR, "produtos_casa_do_arroz.csv")
 ALERTA_PATH   = os.path.join(DATA_DIR, "alertas_hsc.txt")
 SNAPSHOT_PATH = os.path.join(DATA_DIR, "_snapshot_hsc.json")
 
