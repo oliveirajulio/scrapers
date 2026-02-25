@@ -12,6 +12,9 @@ import time
 import requests
 from datetime import datetime
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # -------------------------------------------------------
 # CONFIGURACAO - via variaveis de ambiente no Railway
@@ -45,7 +48,9 @@ def baixar_categorias():
     resp.raise_for_status()
     data = resp.json()
     categorias = data.get("categorias", [])
-    dic_cats = {c["id_grupo"]: c["nome_grupo"] for c in categorias}
+    if categorias:
+        print(f"  DEBUG campos: {list(categorias[0].keys())}")
+    dic_cats = {c.get("id_grupo", c.get("id", "")): c.get("nome_grupo", c.get("nome", c.get("descricao", ""))) for c in categorias}
     print(f"  {len(categorias)} categorias encontradas\n")
     return dic_cats
 

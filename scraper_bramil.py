@@ -3,8 +3,6 @@
 SCRAPER BRAMIL - VIPCOMMERCE API
 ========================================
 Gera: produtos_bramil.csv + alertas_bramil.txt (se houver)
-Tokens expiram a cada sessao do app.
-Se der erro 401/403, atualize BRAMIL_TOKEN e BRAMIL_SESSAO_ID.
 """
 
 import os
@@ -14,9 +12,11 @@ import time
 import requests
 from datetime import datetime
 from pathlib import Path
+from dotenv import load_dotenv
 
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 # -------------------------------------------------------
-# CONFIGURACAO - via variaveis de ambiente no Railway
+# CONFIGURACAO - via variaveis de ambiente
 # -------------------------------------------------------
 TOKEN     = os.environ.get("BRAMIL_TOKEN", "")
 SESSAO_ID = os.environ.get("BRAMIL_SESSAO_ID", "")
