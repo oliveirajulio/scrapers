@@ -71,7 +71,7 @@ def upload_mercado(arquivo, mercado):
             files   = {"csv_file": (arquivo, f, "text/csv")}
             data    = {"market_name": mercado}
             headers = {"X-Admin-Secret": ADMIN_SECRET}
-            response = requests.post(URL, headers=headers, files=files, data=data, timeout=300)
+            response = requests.post(URL, headers=headers, files=files, data=data, timeout=600)
 
         if response.status_code == 200:
             result = response.json()
