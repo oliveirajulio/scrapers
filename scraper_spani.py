@@ -14,12 +14,14 @@ import time
 import requests
 from datetime import datetime
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from dotenv import load_dotenv
 
 load_dotenv()
 
 # -------------------------------------------------------
-# CONFIGURACAO - via variaveis de ambiente no Railway
+# CONFIGURACAO
 # -------------------------------------------------------
 TOKEN     = os.environ.get("SPANI_TOKEN", "")
 SESSAO_ID = os.environ.get("SPANI_SESSAO_ID", "")
@@ -29,6 +31,10 @@ BASE_URL = "https://services-beta.vipcommerce.com.br/api-admin/v1"
 ORG      = "67"
 FILIAL   = "1"
 CD       = "6"
+
+ID_INICIO = 1
+ID_FIM    = 22000
+WORKERS   = 20
 
 ALERTA_DESCONTO_MINIMO = 10
 ALERTA_AUMENTO_MINIMO  = 15
@@ -52,25 +58,6 @@ HEADERS = {
     "X-Requested-With": "br.com.spanionline.appvendas",
 }
 
-DEPARTAMENTOS = [
-    {"id": 1,  "descricao": "Pet"},
-    {"id": 2,  "descricao": "Bazar e Utilidades"},
-    {"id": 3,  "descricao": "Bebidas"},
-    {"id": 4,  "descricao": "Biscoitos"},
-    {"id": 5,  "descricao": "Carnes"},
-    {"id": 6,  "descricao": "Cereais"},
-    {"id": 7,  "descricao": "Congelados"},
-    {"id": 8,  "descricao": "Frios e Laticinios"},
-    {"id": 9,  "descricao": "Hortifruit"},
-    {"id": 10, "descricao": "Limpeza"},
-    {"id": 11, "descricao": "Matinais"},
-    {"id": 12, "descricao": "Mercearia"},
-    {"id": 13, "descricao": "Padaria"},
-    {"id": 14, "descricao": "Perfumaria e Higiene"},
-]
-
-GRUPO_MAP = {d["id"]: str(d["id"]) for d in DEPARTAMENTOS}
-
 
 def preco_efetivo(p):
     if p.get("em_oferta") and p.get("oferta"):
@@ -84,58 +71,51 @@ def preco_original(p):
     return float(p.get("preco", 0) or 0)
 
 
+def buscar_produto(pid):
+    url = f"{BASE_URL}/org/{ORG}/filial/{FILIAL}/centro_distribuicao/{CD}/loja/produtos/{pid}/detalhes"
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=20)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("success") and data.get("data", {}).get("produto"):
+                return data["data"]["produto"]
+        return None
+    except Exception:
+        return None
+
+
 def baixar_produtos():
-    print("[1/3] Baixando produtos...\n")
-    todos = []
+    print("[1/3] Baixando produtos por varredura de IDs...\n")
 
-    for dep in DEPARTAMENTOS:
-        dep_id, dep_nome = dep["id"], dep["descricao"]
-        pagina, total_paginas = 1, 1
-        dep_produtos = []
+    ids = list(range(ID_INICIO, ID_FIM + 1))
+    total = len(ids)
+    encontrados = []
+    lock = Lock()
+    contador = {"ok": 0, "done": 0}
+    inicio = time.time()
 
-        print(f"  {dep_nome} (ID {dep_id})")
+    with ThreadPoolExecutor(max_workers=WORKERS) as executor:
+        futures = {executor.submit(buscar_produto, pid): pid for pid in ids}
 
-        while pagina <= total_paginas:
-            url = (
-                f"{BASE_URL}/org/{ORG}/filial/{FILIAL}/centro_distribuicao/{CD}"
-                f"/loja/classificacoes_mercadologicas/departamentos/{dep_id}/produtos?page={pagina}"
-            )
-            try:
-                resp = requests.get(url, headers=HEADERS, timeout=30)
-                resp.raise_for_status()
-                data = resp.json()
+        for future in as_completed(futures):
+            produto = future.result()
+            with lock:
+                contador["done"] += 1
+                if produto:
+                    contador["ok"] += 1
+                    encontrados.append(produto)
 
-                if data.get("success") and data.get("data"):
-                    dep_produtos.extend(data["data"])
-                    if pagina == 1 and data.get("paginator"):
-                        total_paginas = data["paginator"].get("total_pages", 1)
-                    print(f"    Pagina {pagina}/{total_paginas} - {len(data['data'])} produtos")
-                    pagina += 1
-                else:
-                    break
+                if contador["done"] % 1000 == 0:
+                    elapsed = time.time() - inicio
+                    pct = contador["done"] / total * 100
+                    rps = contador["done"] / elapsed if elapsed > 0 else 0
+                    eta = (total - contador["done"]) / rps if rps > 0 else 0
+                    print(f"  [{pct:.1f}%] {contador['done']}/{total} | encontrados: {contador['ok']} | {rps:.1f} req/s | ETA: {eta/60:.1f}min")
 
-                time.sleep(0.2)
-            except Exception as e:
-                print(f"    ERRO pagina {pagina}: {e}")
-                break
-
-        for p in dep_produtos:
-            p["departamento_id"]   = dep_id
-            p["departamento_nome"] = dep_nome
-
-        print(f"    -> {len(dep_produtos)} produtos\n")
-        todos.extend(dep_produtos)
-        time.sleep(0.3)
-
-    vistos, unicos = set(), []
-    for p in todos:
-        pid = p.get("produto_id")
-        if pid not in vistos:
-            vistos.add(pid)
-            unicos.append(p)
-
-    print(f"  Total: {len(unicos)} produtos unicos\n")
-    return unicos
+    elapsed = time.time() - inicio
+    print(f"\n  Concluido em {elapsed/60:.1f} min")
+    print(f"  Total produtos encontrados: {len(encontrados)}\n")
+    return encontrados
 
 
 def comparar_e_alertar(produtos_novos):
@@ -179,7 +159,7 @@ def comparar_e_alertar(produtos_novos):
     return alertas
 
 
-def salvar(produtos_unicos, alertas):
+def salvar(produtos, alertas):
     print("[3/3] Salvando arquivos...")
     hoje = datetime.now().strftime("%Y-%m-%d")
 
@@ -189,8 +169,9 @@ def salvar(produtos_unicos, alertas):
         "nome_foto", "fracionada", "permite_adicionais", "dt_entrada",
         "departamento", "em_oferta", "disponivel", "sku",
     ]
+
     linhas = []
-    for p in produtos_unicos:
+    for p in produtos:
         pe = preco_efetivo(p)
         po = preco_original(p)
         linhas.append({
@@ -201,14 +182,14 @@ def salvar(produtos_unicos, alertas):
             "preco_promocional":  f"{pe:.2f}" if p.get("em_oferta") and p.get("oferta") else "",
             "preco_original":     f"{po:.2f}",
             "estoque":            "0",
-            "grupo_id":           GRUPO_MAP.get(p.get("departamento_id"), "0"),
+            "grupo_id":           "0",
             "subgrupo_id":        "",
             "descricao":          "",
             "nome_foto":          p.get("imagem", ""),
             "fracionada":         "1" if p.get("unidade_sigla") == "KG" else "0",
             "permite_adicionais": "N",
             "dt_entrada":         hoje,
-            "departamento":       p.get("departamento_nome", ""),
+            "departamento":       "",
             "em_oferta":          str(p.get("em_oferta", "")),
             "disponivel":         str(p.get("disponivel", "")),
             "sku":                p.get("sku", ""),
@@ -218,7 +199,7 @@ def salvar(produtos_unicos, alertas):
         writer = csv.DictWriter(f, fieldnames=campos)
         writer.writeheader()
         writer.writerows(linhas)
-    print(f"  OK -> {CSV_PATH}")
+    print(f"  OK -> {CSV_PATH} ({len(linhas)} produtos)")
 
     if alertas:
         data_exibicao = datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -234,14 +215,22 @@ def salvar(produtos_unicos, alertas):
         print("  Sem alertas nesta execucao")
 
     with open(SNAPSHOT_PATH, "w", encoding="utf-8") as f:
-        json.dump(produtos_unicos, f, ensure_ascii=False)
+        json.dump(produtos, f, ensure_ascii=False)
     print(f"  OK -> snapshot salvo\n")
 
 
 def main():
+    if not TOKEN:
+        print("ERRO: SPANI_TOKEN nao definido.")
+        return
+    if not SESSAO_ID:
+        print("ERRO: SPANI_SESSAO_ID nao definido.")
+        return
+
     print("=============================================")
     print("  SCRAPER SPANI - VIPCOMMERCE")
     print(f"  {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    print(f"  Varrendo IDs {ID_INICIO} a {ID_FIM} ({WORKERS} workers)")
     print("=============================================\n")
 
     produtos = baixar_produtos()

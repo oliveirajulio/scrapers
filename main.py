@@ -6,7 +6,8 @@ Roda em sequencia:
 1. Scraper Bramil
 2. Scraper HSC (Casa do Arroz)
 3. Scraper Spani
-4. Upload de todos os CSVs pro backend
+4. Scraper Royal
+5. Upload de todos os CSVs pro backend
 """
 
 import os
@@ -22,6 +23,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 import scraper_bramil
 import scraper_hsc
 import scraper_spani
+import scraper_royal
 
 # ===== CONFIGURAÇÕES DO UPLOAD =====
 DATA_DIR     = os.environ.get("DATA_DIR", "/data")
@@ -33,6 +35,7 @@ MERCADOS = [
     {"arquivo": "produtos_bramil.csv",         "mercado": "Bramil Supermercados"},
     {"arquivo": "produtos_casa_do_arroz.csv",   "mercado": "Casa do Arroz"},
     {"arquivo": "produtos_spani.csv",           "mercado": "Spani Atacadista"},
+    {"arquivo": "produtos_royal.csv",           "mercado": "Royal Supermercados"},
 ]
 
 
@@ -71,7 +74,7 @@ def upload_mercado(arquivo, mercado):
             files   = {"csv_file": (arquivo, f, "text/csv")}
             data    = {"market_name": mercado}
             headers = {"X-Admin-Secret": ADMIN_SECRET}
-            response = requests.post(URL, headers=headers, files=files, data=data, timeout=600)
+            response = requests.post(URL, headers=headers, files=files, data=data, timeout=1200)
 
         if response.status_code == 200:
             result = response.json()
@@ -128,12 +131,13 @@ def main():
     separador("ETAPA 1/2 - SCRAPERS")
 
     scraper_ok = {
-        "Bramil":       rodar_scraper("Bramil",       scraper_bramil),
+        "Bramil":        rodar_scraper("Bramil",        scraper_bramil),
         "Casa do Arroz": rodar_scraper("Casa do Arroz", scraper_hsc),
-        "Spani":        rodar_scraper("Spani",        scraper_spani),
+        "Spani":         rodar_scraper("Spani",         scraper_spani),
+        "Royal":         rodar_scraper("Royal",         scraper_royal),
     }
 
-    scrapers_ok  = sum(1 for v in scraper_ok.values() if v)
+    scrapers_ok   = sum(1 for v in scraper_ok.values() if v)
     scrapers_fail = sum(1 for v in scraper_ok.values() if not v)
     print(f"\n  Scrapers: {scrapers_ok} ok / {scrapers_fail} com falha")
 
@@ -163,8 +167,8 @@ def main():
 
     separador("RESUMO FINAL")
     print(f"  ⏱️  Duração: {duracao} minutos")
-    print(f"  🔍 Scrapers:  {scrapers_ok}/3 ok")
-    print(f"  📤 Uploads:   {uploads_ok}/3 ok")
+    print(f"  🔍 Scrapers:  {scrapers_ok}/4 ok")
+    print(f"  📤 Uploads:   {uploads_ok}/4 ok")
     print("=" * 60)
 
 
